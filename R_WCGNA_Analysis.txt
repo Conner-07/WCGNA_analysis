@@ -1,0 +1,166 @@
+
+R version 4.4.2 (2024-10-31) -- "Pile of Leaves"
+Copyright (C) 2024 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[R.app GUI 1.81 (8462) aarch64-apple-darwin20]
+
+[Workspace restored from /Users/connerstarkey/.RData]
+[History restored from /Users/connerstarkey/.Rapp.history]
+
+> # ========================
+> # WGCNA Setup for GSE76250 - RESET AND START CLEAN
+> # ========================
+> 
+> # Install and load WGCNA
+> if (!require("WGCNA")) install.packages("WGCNA")
+Loading required package: WGCNA
+Loading required package: dynamicTreeCut
+Loading required package: fastcluster
+
+Attaching package: ‘fastcluster’
+
+The following object is masked from ‘package:stats’:
+
+    hclust
+
+
+Attaching package: ‘WGCNA’
+
+The following object is masked from ‘package:stats’:
+
+    cor
+
+> library(WGCNA)
+> 
+> # Allow multi-threading (optional)
+> enableWGCNAThreads()
+Allowing parallel execution with up to 7 working processes.
+> 
+> # Set options
+> options(stringsAsFactors = FALSE)
+> 
+> # ===== Step 1: Load Data Properly =====
+> exprData <- read.delim("/Users/connerstarkey/Downloads/GSE76250_series_matrix.txt", skip=67, header=TRUE)
+> exprData <- exprData[!grepl("!series_matrix_table_end", exprData[,1]), ]
+> rownames(exprData) <- exprData$ID_REF
+> exprData <- exprData[, -1]
+> exprData <- as.data.frame(lapply(exprData, as.numeric))
+There were 50 or more warnings (use warnings() to see the first 50)
+> rownames(exprData) <- rownames(exprData)
+> 
+> # Transpose so samples are rows
+> datExpr <- t(exprData)
+> 
+> # ===== Step 2: Filter Good Genes =====
+> gsg = goodSamplesGenes(datExpr, verbose = 3)
+ Flagging genes and samples with too many missing values...
+  ..step 1
+  ..Excluding 7 genes from the calculation due to too many missing samples or zero variance.
+  ..step 2
+> datExpr <- datExpr[, gsg$goodGenes]  # Keep only good genes
+> 
+> # ===== Step 3: Reduce Size to Top 5000 Most Variable Genes =====
+> if (!require("matrixStats")) install.packages("matrixStats")
+Loading required package: matrixStats
+> library(matrixStats)
+> 
+> geneVariances <- colVars(as.matrix(datExpr))
+> topGenes <- order(geneVariances, decreasing = TRUE)[1:5000]
+> datExpr <- datExpr[, topGenes]
+> 
+> # ===== Step 4: Pick Soft Threshold =====
+> powers = c(1:20)
+> sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+pickSoftThreshold: will use block size 5000.
+ pickSoftThreshold: calculating connectivity for given powers...
+   ..working on genes 1 through 5000 of 5000
+   Power SFT.R.sq  slope truncated.R.sq mean.k. median.k. max.k.
+1      1   0.0716  0.316          0.958  944.00   910.000 1660.0
+2      2   0.4950 -0.797          0.925  306.00   265.000  847.0
+3      3   0.7250 -1.210          0.920  133.00    96.900  512.0
+4      4   0.7750 -1.400          0.915   69.60    43.700  338.0
+5      5   0.8270 -1.400          0.953   41.30    22.100  235.0
+6      6   0.8580 -1.380          0.971   26.90    12.500  170.0
+7      7   0.8510 -1.380          0.960   18.80     7.450  130.0
+8      8   0.8440 -1.370          0.957   13.90     4.880  103.0
+9      9   0.8470 -1.370          0.950   10.70     3.250   84.7
+10    10   0.8980 -1.310          0.969    8.57     2.330   71.1
+11    11   0.8820 -1.390          0.966    7.06     1.770   65.2
+12    12   0.8750 -1.460          0.971    5.97     1.360   61.5
+13    13   0.8860 -1.470          0.981    5.15     1.080   58.2
+14    14   0.8920 -1.500          0.976    4.53     0.956   55.3
+15    15   0.9040 -1.510          0.984    4.04     0.847   52.6
+16    16   0.9010 -1.530          0.968    3.64     0.743   50.1
+17    17   0.8750 -1.540          0.919    3.32     0.679   47.8
+18    18   0.8670 -1.560          0.914    3.06     0.606   45.6
+19    19   0.8680 -1.550          0.911    2.84     0.542   43.6
+20    20   0.8980 -1.510          0.955    2.66     0.481   41.8
+> 
+> # Plot
+> plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
++      xlab="Soft Threshold (power)", ylab="Scale Free Topology Model Fit, signed R^2", type="n")
+> text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
++      labels=powers, cex=0.9, col="red")
+> abline(h=0.90, col="blue")
+> 
+> # ===== Step 5: Build Network =====
+> softPower = 6  # or choose based on your plot
+> 
+> adjacency = adjacency(datExpr, power = softPower)
+> TOM = TOMsimilarity(adjacency)
+..connectivity..
+..matrix multiplication (system BLAS)..
+..normalization..
+..done.
+> dissTOM = 1 - TOM
+> 
+> geneTree = hclust(as.dist(dissTOM), method = "average")
+> plot(geneTree, xlab="", sub="", main="Gene Clustering on TOM-based Dissimilarity", labels=FALSE, hang=0.04)
+> 
+> # ===== Step 6: Detect Modules =====
+> minModuleSize = 30
+> dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
++                             deepSplit = 2, pamRespectsDendro = FALSE,
++                             minClusterSize = minModuleSize)
+ ..cutHeight not given, setting it to 0.994  ===>  99% of the (truncated) height range in dendro.
+ ..done.
+> 
+> dynamicColors = labels2colors(dynamicMods)
+> table(dynamicColors)
+dynamicColors
+       black         blue        brown         cyan    darkgreen      darkred        green  greenyellow         grey       grey60    lightcyan   lightgreen  lightyellow      magenta 
+         209          561          479          115           38           47          387          152          385           59           62           58           58          161 
+midnightblue         pink       purple          red    royalblue       salmon          tan    turquoise       yellow 
+          97          206          155          215           55          123          147          812          419 
+> 
+> plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
++                     dendroLabels = FALSE, hang = 0.03,
++                     addGuide = TRUE, guideHang = 0.05)
+> 
+> # ===== Step 7: Save Modules =====
+> geneModules = data.frame(Gene = colnames(datExpr), Module = dynamicColors)
+> write.csv(geneModules, "/Users/connerstarkey/Downloads/GSE76250_Gene_Modules.csv", row.names = FALSE)
+> 
+> # ===== Step 8: Module Eigengenes (optional) =====
+> MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+> MEs = MEList$eigengenes
+> 
+> METree = hclust(as.dist(1-cor(MEs)), method = "average")
+> plot(METree, main="Clustering of Module Eigengenes", xlab="", sub="")
+> 
+> 
